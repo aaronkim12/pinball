@@ -97,7 +97,7 @@
 </div>
 <p id="hint">
   구슬을 투입하면 룰렛이 배율을 정하고, <b>빨간 LED</b>가 켜진 구멍에 넣으면 <b>배팅 × 배율</b>만큼 받아요! (빗나가면 몰수)<br>
-  배율별 LED 구멍 수 — ×2→7칸 · ×4→5칸 · ×5→5칸 · ×8→4칸 · ×10→3칸 · ×15→2칸 · ×20→1칸 · 🏆 무한 플레이! 최고 기록에 도전하세요
+  배율별 LED 구멍 수 — ×2→9칸 · ×4→7칸 · ×5→6칸 · ×8→5칸 · ×10→4칸 · ×15→3칸 · ×20→2칸 · 🏆 무한 플레이! 최고 기록에 도전하세요
 </p>
 
 <script>
@@ -133,9 +133,9 @@ const START_MARBLES = 100;
 
 /* multiplier → number of lit holes (higher = harder) */
 const MULT_INFO = {
-  2:{n:7,color:'#4a7fc1'}, 4:{n:5,color:'#3fa05a'}, 5:{n:5,color:'#2aa198'},
-  8:{n:4,color:'#d07a2a'}, 10:{n:3,color:'#9b59b6'}, 15:{n:2,color:'#d4242a'},
-  20:{n:1,color:'#d4af37'},
+  2:{n:9,color:'#4a7fc1'}, 4:{n:7,color:'#3fa05a'}, 5:{n:6,color:'#2aa198'},
+  8:{n:5,color:'#d07a2a'}, 10:{n:4,color:'#9b59b6'}, 15:{n:3,color:'#d4242a'},
+  20:{n:2,color:'#d4af37'},
 };
 /* roulette wheel: 16 weighted segments */
 const SEGS = [2,4,5,2,8,4,10,2,15,5,4,2,8,20,5,2];
