@@ -158,6 +158,7 @@ for (let i = 1; i < SLOT_N; i++)
 let state = 'BET';               // BET → SPIN → SHOOT → RESULT → OVER
 let marbles = START_MARBLES;
 let bet = 10;
+let wager = 0;                   // locked-in bet for the current round (never clamped mid-round)
 let mult = 0;
 let litSlots = [];               // revealed LEDs (grows during reveal)
 let litChosen = [];              // full chosen set
@@ -192,7 +193,7 @@ function updateHUD(){
   document.getElementById('marbles').textContent = marbles.toLocaleString();
   document.getElementById('best').textContent = Math.max(best, marbles).toLocaleString();
   document.getElementById('rounds').textContent = rounds;
-  bet = Math.max(1, Math.min(bet, Math.max(1, marbles)));
+  if (state === 'BET') bet = Math.max(1, Math.min(bet, Math.max(1, marbles)));
   document.getElementById('betAmt').textContent = bet + '개';
   const canBet = state === 'BET' && marbles > 0;
   document.querySelectorAll('#betbar button').forEach(b => b.disabled = !canBet);
@@ -313,9 +314,10 @@ function doInsert(){
   initAudio();
   if (state !== 'BET' || marbles <= 0) return;
   bet = Math.max(1, Math.min(bet, marbles));
-  marbles -= bet;
+  wager = bet;                   // lock in the bet for this round
+  marbles -= wager;
   rounds++;
-  sndInsert(bet);
+  sndInsert(wager);
   state = 'SPIN';
   stateMsg = '🎰 룰렛 회전 중...';
   startSpin();
@@ -355,7 +357,7 @@ function onSpinEnd(){
   });
   safeTimeout(()=>{
     state = 'SHOOT';
-    stateMsg = `×${mult} — 빨간 LED 구멍을 노려라! (배팅 ${bet}개)`;
+    stateMsg = `×${mult} — 빨간 LED 구멍을 노려라! (배팅 ${wager}개)`;
     balls.push(newBall());
     updateHUD();
   }, 500 + litChosen.length*180 + 350);
@@ -394,7 +396,7 @@ function resolveRound(b){
   const hit = litChosen.includes(idx);
   state = 'RESULT';
   if (hit){
-    const payout = bet * mult;
+    const payout = wager * mult;
     marbles += payout;
     sndWin(payout, mult);
     // impact scales with how much you won
@@ -412,7 +414,7 @@ function resolveRound(b){
                   t:1.8, color:'#ffd24a', size:26 });
   } else {
     sndMiss();
-    stateMsg = `😵 꽝... 배팅한 ${bet}개를 잃었어요`;
+    stateMsg = `😵 꽝... 배팅한 ${wager}개를 잃었어요`;
     popups.push({ x: SLOT_L + SLOT_W*(idx+0.5), y: 740, txt:'꽝', t:1.4, color:'#ff8a8a', size:20 });
   }
   if (marbles > best){ best = marbles; localStorage.setItem('tw-pinball-best', best); }
