@@ -65,6 +65,39 @@
     box-shadow:0 4px 0 #8a5d14, 0 8px 18px rgba(0,0,0,.5); transition:transform .08s;
   }
   #restart:active { transform:translateY(3px); box-shadow:0 1px 0 #8a5d14; }
+  /* ----- online leaderboard ----- */
+  #main { flex:1; display:flex; gap:16px; align-items:stretch; min-height:0; padding:0 10px; }
+  #left { display:flex; flex-direction:column; align-items:center; min-height:0; }
+  #lbPanel {
+    width:252px; align-self:center; max-height:calc(100vh - 120px);
+    background:linear-gradient(170deg,#2e2113,#1d1409); border:2px solid #6b4a26; border-radius:14px;
+    padding:14px; display:flex; flex-direction:column; gap:8px; overflow:hidden auto;
+  }
+  #lbPanel h2 { font-size:16px; color:#ffd24a; text-align:center; letter-spacing:1px; }
+  #lbStatus { font-size:11px; color:#a78d62; text-align:center; min-height:14px; }
+  #lbList { list-style:none; display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  #lbList li { display:flex; justify-content:space-between; background:rgba(0,0,0,.3); padding:5px 9px; border-radius:7px; }
+  #lbList li.mine { outline:1px solid #ffd24a; background:rgba(255,210,74,.12); }
+  #lbList li:first-child { font-size:15px; }
+  .lbName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:8px; }
+  .lbScore { color:#8fe3ff; font-weight:bold; font-variant-numeric:tabular-nums; }
+  .nickRow { display:flex; gap:6px; }
+  .nickRow input {
+    flex:1; min-width:0; background:#120b04; border:1px solid #6b4a26; color:#ffe9b0;
+    border-radius:7px; padding:7px 9px; font-size:13px;
+  }
+  .nickRow button {
+    border:none; border-radius:7px; padding:7px 12px; font-weight:bold; cursor:pointer;
+    background:linear-gradient(180deg,#ffd56b,#e09a2d); color:#3a2305;
+  }
+  #lbMsg, #ovMsg { font-size:12px; color:#7CFC9A; text-align:center; min-height:15px; }
+  #ovSubmit { margin-bottom:14px; }
+  #ovSubmit .nickRow input { font-size:15px; }
+  @media (max-width: 920px){
+    body { overflow:auto; }
+    #main { flex-direction:column; align-items:center; }
+    #lbPanel { width:min(480px, 92vw); }
+  }
 </style>
 </head>
 <body>
@@ -76,12 +109,19 @@
     <div class="stat"><label>판 수</label><div id="rounds">0</div></div>
   </div>
 </header>
+<div id="main">
+<div id="left">
 <div id="stage">
   <canvas id="game" width="560" height="920"></canvas>
   <div id="overlay">
     <div id="panel">
       <h2 id="ovTitle">게임 종료</h2>
       <div id="ovStats"></div>
+      <div id="ovSubmit">
+        <div style="font-size:14px;color:#e8c89a;margin-bottom:8px;">최고 기록 <b id="ovBest" style="color:#8fe3ff;">0</b>개 — 온라인 랭킹에 올려보세요!</div>
+        <div class="nickRow"><input id="ovNick" maxlength="12" placeholder="닉네임 (최대 12자)"><button id="ovSend">🌐 랭킹 등록</button></div>
+        <div id="ovMsg"></div>
+      </div>
       <button id="restart">🔄 구슬 100개로 다시 시작</button>
     </div>
   </div>
@@ -99,7 +139,17 @@
   구슬을 투입하면 룰렛이 배율을 정하고, <b>빨간 LED</b>가 켜진 구멍에 넣으면 <b>배팅 × 배율</b>만큼 받아요! (빗나가면 몰수)<br>
   배율별 LED 구멍 수 (12칸 중) — ×2→4칸 · ×4→3칸 · ×5→3칸 · ×8→2칸 · ×10→2칸 · ×15→1칸 · ×20→1칸 · 🏆 무한 플레이! 최고 기록에 도전하세요
 </p>
+</div>
+<aside id="lbPanel">
+  <h2>🌐 실시간 랭킹 TOP 20</h2>
+  <div id="lbStatus">불러오는 중...</div>
+  <ol id="lbList"></ol>
+  <div class="nickRow"><input id="nick" maxlength="12" placeholder="닉네임"><button id="lbSend">기록 등록</button></div>
+  <div id="lbMsg"></div>
+</aside>
+</div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 'use strict';
 /* ============================================================
@@ -190,6 +240,7 @@ function newBall(){
 function currentBall(){ return balls.find(b => b.state !== 'done'); }
 
 function updateHUD(){
+  if (marbles > best){ best = marbles; localStorage.setItem('tw-pinball-best', best); }
   document.getElementById('marbles').textContent = marbles.toLocaleString();
   document.getElementById('best').textContent = Math.max(best, marbles).toLocaleString();
   document.getElementById('rounds').textContent = rounds;
@@ -431,6 +482,9 @@ function endGame(){
   document.getElementById('ovTitle').textContent = '💸 파산...';
   document.getElementById('ovStats').innerHTML =
     `플레이 <b>${rounds}판</b><br>최고 기록 <b>${best.toLocaleString()}개</b>`;
+  document.getElementById('ovBest').textContent = best.toLocaleString();
+  document.getElementById('ovMsg').textContent = '';
+  document.getElementById('ovSubmit').style.display = LB_ON ? '' : 'none';
   document.getElementById('overlay').classList.add('show');
   updateHUD();
 }
@@ -604,6 +658,7 @@ function chargeRelease(){
 cv.addEventListener('pointerdown', e => { e.preventDefault(); chargeStart(); });
 window.addEventListener('pointerup', chargeRelease);
 window.addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') return;   // typing a nickname
   if (e.code === 'Space' && !e.repeat){ e.preventDefault(); chargeStart(); }
   if (e.code === 'Enter' && state === 'BET') doInsert();
 });
@@ -1059,6 +1114,95 @@ function frame(t){
   requestAnimationFrame(frame);
 }
 
+/* ============================================================
+   ONLINE LEADERBOARD — Supabase (free tier)
+   table: scores(name pk, score, updated_at) + keep-highest trigger
+   ============================================================ */
+const SUPA_URL = '';   // e.g. https://xxxx.supabase.co
+const SUPA_KEY = '';   // anon public key (safe to expose)
+const LB_ON = /^https:\/\//.test(SUPA_URL);
+const lbHeaders = { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY };
+
+function myNick(){ return localStorage.getItem('tw-pinball-nick') || ''; }
+
+async function lbFetch(){
+  if (!LB_ON) return;
+  try {
+    const r = await fetch(`${SUPA_URL}/rest/v1/scores?select=name,score&order=score.desc,updated_at.asc&limit=20`,
+                          { headers: lbHeaders });
+    if (!r.ok) throw 0;
+    renderLB(await r.json());
+    document.getElementById('lbStatus').textContent = '';
+  } catch(e){
+    document.getElementById('lbStatus').textContent = '연결 실패 — 잠시 후 재시도합니다';
+  }
+}
+function renderLB(rows){
+  const ol = document.getElementById('lbList');
+  ol.innerHTML = '';
+  const me = myNick();
+  rows.forEach((row, i) => {
+    const li = document.createElement('li');
+    const medal = i===0 ? '🥇' : i===1 ? '🥈' : i===2 ? '🥉' : `${i+1}.`;
+    const nm = document.createElement('span');
+    nm.className = 'lbName'; nm.textContent = `${medal} ${row.name}`;
+    const sc = document.createElement('span');
+    sc.className = 'lbScore'; sc.textContent = (+row.score).toLocaleString();
+    li.appendChild(nm); li.appendChild(sc);
+    if (me && row.name === me) li.classList.add('mine');
+    ol.appendChild(li);
+  });
+  if (!rows.length){
+    const li = document.createElement('li');
+    li.textContent = '아직 기록이 없어요 — 1등을 차지하세요!';
+    ol.appendChild(li);
+  }
+}
+async function lbSubmit(rawName, score, msgEl){
+  if (!LB_ON){ msgEl.textContent = '랭킹 서버가 아직 연결되지 않았어요'; return; }
+  const name = (rawName || '').trim().slice(0, 12);
+  if (!name){ msgEl.textContent = '닉네임을 입력하세요'; return; }
+  if (!/^[가-힣ㄱ-ㅎa-zA-Z0-9 _\-]{1,12}$/.test(name)){
+    msgEl.textContent = '닉네임은 한글/영문/숫자/공백/-_만 가능해요'; return;
+  }
+  if (!(score > 0)){ msgEl.textContent = '아직 등록할 기록이 없어요'; return; }
+  localStorage.setItem('tw-pinball-nick', name);
+  msgEl.textContent = '등록 중...';
+  try {
+    const r = await fetch(`${SUPA_URL}/rest/v1/scores`, {
+      method: 'POST',
+      headers: { ...lbHeaders, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify([{ name, score }]),
+    });
+    if (!r.ok) throw 0;
+    msgEl.textContent = '✅ 등록 완료!';
+    blip('triangle', 880, 0.2, 0.2, 880);
+    blip('triangle', 1175, 0.3, 0.2, 1175, 0, 0.12);
+    lbFetch();
+  } catch(e){ msgEl.textContent = '등록 실패 — 다시 시도해주세요'; }
+}
+function lbInit(){
+  const nickEls = [document.getElementById('nick'), document.getElementById('ovNick')];
+  nickEls.forEach(el => el.value = myNick());
+  document.getElementById('lbSend').addEventListener('click', () =>
+    lbSubmit(document.getElementById('nick').value, best, document.getElementById('lbMsg')));
+  document.getElementById('ovSend').addEventListener('click', () =>
+    lbSubmit(document.getElementById('ovNick').value, best, document.getElementById('ovMsg')));
+  if (!LB_ON){
+    document.getElementById('lbStatus').textContent = '⏳ 랭킹 서버 연결 준비 중...';
+    return;
+  }
+  lbFetch();
+  setInterval(lbFetch, 30000);                       // safety-net polling
+  if (window.supabase){                              // realtime push updates
+    const supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+    supa.channel('scores-live')
+      .on('postgres_changes', { event:'*', schema:'public', table:'scores' }, lbFetch)
+      .subscribe();
+  }
+}
+
+lbInit();
 resetGame();
 requestAnimationFrame(frame);
 </script>
