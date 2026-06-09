@@ -37,10 +37,12 @@
   #betbar button:active:not(:disabled) { transform:scale(.93); }
   #betbar button:disabled { opacity:.35; cursor:default; }
   #betAmt {
-    min-width:86px; text-align:center; font-size:20px; font-weight:bold; color:#8fe3ff;
-    background:rgba(0,0,0,.5); border:1px solid #4a6a7a; border-radius:8px; padding:6px 10px;
-    font-variant-numeric:tabular-nums;
+    width:96px; text-align:center; font-size:20px; font-weight:bold; color:#8fe3ff;
+    background:rgba(0,0,0,.5); border:1px solid #4a6a7a; border-radius:8px; padding:6px 8px;
+    font-variant-numeric:tabular-nums; -moz-appearance:textfield;
   }
+  #betAmt:focus { outline:none; border-color:#8fe3ff; box-shadow:0 0 0 2px rgba(143,227,255,.3); }
+  #betAmt::-webkit-outer-spin-button, #betAmt::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
   #insert {
     background:linear-gradient(180deg,#ffd56b,#e09a2d) !important; color:#3a2305 !important;
     font-size:16px !important; padding:9px 22px !important;
@@ -93,10 +95,38 @@
   #lbMsg, #ovMsg { font-size:12px; color:#7CFC9A; text-align:center; min-height:15px; }
   #ovSubmit { margin-bottom:14px; }
   #ovSubmit .nickRow input { font-size:15px; }
-  @media (max-width: 920px){
-    body { overflow:auto; }
-    #main { flex-direction:column; align-items:center; }
-    #lbPanel { width:min(480px, 92vw); }
+  /* ---- tablet / stacked ---- */
+  @media (max-width: 960px){
+    body { overflow:auto; height:auto; }
+    #main { flex-direction:column; align-items:center; padding:0 8px; }
+    #left { width:100%; }
+    #stage { flex:none; width:100%; }
+    canvas { height:auto; width:100%; max-width:min(560px, 96vw); max-height:none; }
+    #lbPanel { width:min(560px, 96vw); max-height:none; }
+  }
+  /* ---- phones ---- */
+  @media (max-width: 560px){
+    header { gap:8px; padding:6px 4px 2px; }
+    h1 { font-size:19px; letter-spacing:1px; }
+    h1 span { font-size:10px; letter-spacing:2px; margin-left:4px; }
+    #hud { gap:7px; }
+    .stat { min-width:0; flex:1; padding:3px 6px; border-radius:8px; }
+    .stat label { font-size:9px; letter-spacing:1px; }
+    .stat > div { font-size:16px; }
+    #hud { width:100%; }
+    #betbar { gap:5px; flex-wrap:wrap; justify-content:center; padding:8px 4px 2px; }
+    #betbar button { padding:11px 12px; font-size:15px; }
+    #betAmt { width:74px; font-size:18px; padding:9px 4px; }
+    #insert { width:100%; order:9; padding:13px 0 !important; font-size:17px !important; }
+    #hint { font-size:11px; padding:6px 6px 14px; }
+    #panel { padding:24px 22px; width:92vw; }
+    #panel h2 { font-size:22px; }
+    #restart { font-size:16px; padding:12px 24px; }
+  }
+  /* bigger touch targets on coarse pointers */
+  @media (pointer: coarse){
+    #betbar button { min-height:44px; }
+    .nickRow button, .nickRow input { min-height:42px; }
   }
 </style>
 </head>
@@ -129,7 +159,7 @@
 <div id="betbar">
   <button data-d="-10">−10</button>
   <button data-d="-1">−1</button>
-  <div id="betAmt">10</div>
+  <input id="betAmt" type="number" inputmode="numeric" min="1" value="10" aria-label="배팅할 구슬 수">
   <button data-d="1">+1</button>
   <button data-d="10">+10</button>
   <button id="betMax">MAX</button>
@@ -149,7 +179,8 @@
 </aside>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 <script>
 'use strict';
 /* ============================================================
@@ -245,9 +276,12 @@ function updateHUD(){
   document.getElementById('best').textContent = Math.max(best, marbles).toLocaleString();
   document.getElementById('rounds').textContent = rounds;
   if (state === 'BET') bet = Math.max(1, Math.min(bet, Math.max(1, marbles)));
-  document.getElementById('betAmt').textContent = bet + '개';
+  const betEl = document.getElementById('betAmt');
+  if (document.activeElement !== betEl) betEl.value = bet;
   const canBet = state === 'BET' && marbles > 0;
   document.querySelectorAll('#betbar button').forEach(b => b.disabled = !canBet);
+  betEl.disabled = !canBet;
+  if (typeof checkTheme === 'function') checkTheme();
 }
 
 /* ============================================================
@@ -667,29 +701,102 @@ window.addEventListener('blur', chargeRelease);
 
 document.querySelectorAll('#betbar button[data-d]').forEach(btn =>
   btn.addEventListener('click', ()=>{
-    bet = Math.max(1, Math.min(bet + (+btn.dataset.d), marbles));
+    bet = Math.max(1, Math.min(bet + (+btn.dataset.d), Math.max(1, marbles)));
     sndClack(0, 0.12);
     updateHUD();
   }));
 document.getElementById('betMax').addEventListener('click', ()=>{
   bet = Math.max(1, marbles); sndClack(0, 0.12); updateHUD();
 });
+// typeable bet amount
+const betInput = document.getElementById('betAmt');
+betInput.addEventListener('input', ()=>{
+  const digits = betInput.value.replace(/[^0-9]/g, '');
+  if (digits === ''){ return; }            // allow temporary empty while typing
+  let v = parseInt(digits, 10);
+  const max = Math.max(1, marbles);
+  v = Math.max(1, Math.min(v, max));
+  bet = v;
+  if (String(v) !== betInput.value) betInput.value = v;   // reflect clamp
+});
+betInput.addEventListener('blur', ()=>{ betInput.value = bet; });
+betInput.addEventListener('keydown', e=>{
+  if (e.key === 'Enter'){ betInput.blur(); doInsert(); }
+});
 document.getElementById('insert').addEventListener('click', doInsert);
 document.getElementById('restart').addEventListener('click', resetGame);
 
 /* ============================================================
-   RENDERING — static board on offscreen canvas
+   THEMES — the board (map) changes as your fortune grows
+   ============================================================ */
+const THEMES = [
+  { name:'🌳 야시장 목재', from:0,
+    wood:['#9a6a38','#8a5c2e','#7a4f26'], grainA:'#5e3c18', grainB:'#b98c52',
+    field:['#7c4f22','#634019'], fieldGrain:'#3d2407',
+    trimDark:'#46280c', accent:'#c89b4a', accentSoft:'rgba(200,155,74,.6)',
+    laneArrow:'rgba(255,220,140,.4)', gate:'#5a3a14',
+    pocketA:'#56371a', pocketB:'#4c2f14', pocketBottom:'#1c0e02', hole:'#0a0501',
+    ledOff:'#3a0a08', ledOffStroke:'#1c0502', divider:'#3a2008', dividerHi:'rgba(255,210,120,.3)',
+    bodyBg:'radial-gradient(ellipse at 50% 20%, #2a2433 0%, #161219 70%)' },
+
+  { name:'💚 비취 옥궁', from:1000,
+    wood:['#2f8f6b','#1f7256','#155843'], grainA:'#0e3b2c', grainB:'#5fcfa6',
+    field:['#1f6e54','#124433'], fieldGrain:'#0a2f23',
+    trimDark:'#0c3327', accent:'#7fe9c4', accentSoft:'rgba(127,233,196,.5)',
+    laneArrow:'rgba(200,255,235,.4)', gate:'#0e4435',
+    pocketA:'#1c5e49', pocketB:'#154a3a', pocketBottom:'#06231a', hole:'#04140f',
+    ledOff:'#0e3b2c', ledOffStroke:'#04140f', divider:'#0a2f23', dividerHi:'rgba(160,255,225,.3)',
+    bodyBg:'radial-gradient(ellipse at 50% 20%, #123a30 0%, #07140f 70%)' },
+
+  { name:'👑 황금 궁전', from:10000,
+    wood:['#b8401f','#9a2f14','#7a200d'], grainA:'#5a1407', grainB:'#e8a23a',
+    field:['#a8331a','#6e1e0c'], fieldGrain:'#4a1106',
+    trimDark:'#3a0e05', accent:'#ffd24a', accentSoft:'rgba(255,210,74,.6)',
+    laneArrow:'rgba(255,235,150,.45)', gate:'#5a1608',
+    pocketA:'#8a2c14', pocketB:'#6e2010', pocketBottom:'#2a0a03', hole:'#180502',
+    ledOff:'#3a0a08', ledOffStroke:'#180502', divider:'#4a1106', dividerHi:'rgba(255,220,120,.35)',
+    bodyBg:'radial-gradient(ellipse at 50% 20%, #4a1208 0%, #1a0603 70%)' },
+
+  { name:'🌃 네온 시티', from:100000,
+    wood:['#241a3a','#1a1230','#120c24'], grainA:'#0c0820', grainB:'#7a3aff',
+    field:['#1c1438','#0c0820'], fieldGrain:'#2a1a55',
+    trimDark:'#0a0618', accent:'#36e6ff', accentSoft:'rgba(54,230,255,.55)',
+    laneArrow:'rgba(120,240,255,.5)', gate:'#2a1a55',
+    pocketA:'#241a44', pocketB:'#1a1230', pocketBottom:'#08040f', hole:'#04020a',
+    ledOff:'#2a0a30', ledOffStroke:'#08040f', divider:'#3a2466', dividerHi:'rgba(120,240,255,.4)',
+    bodyBg:'radial-gradient(ellipse at 50% 20%, #1a0f3a 0%, #050310 70%)' },
+
+  { name:'🌌 코스믹 우주', from:1000000,
+    wood:['#3a1a5e','#26104a','#160830'], grainA:'#0e0524', grainB:'#c060ff',
+    field:['#2a1250','#120630'], fieldGrain:'#1a0a3a',
+    trimDark:'#0c0420', accent:'#ffd24a', accentSoft:'rgba(255,210,74,.6)',
+    laneArrow:'rgba(255,220,150,.5)', gate:'#1a0a3a',
+    pocketA:'#2e1656', pocketB:'#1f0e42', pocketBottom:'#0a0420', hole:'#050210',
+    ledOff:'#3a0a30', ledOffStroke:'#050210', divider:'#3a1a66', dividerHi:'rgba(255,210,120,.4)',
+    bodyBg:'radial-gradient(ellipse at 50% 20%, #2a0f5e 0%, #060312 70%)' },
+];
+function themeIdxFor(m){
+  let idx = 0;
+  for (let i = 0; i < THEMES.length; i++) if (m >= THEMES[i].from) idx = i;
+  return idx;
+}
+let themeIdx = 0;
+let themeFx = null;   // { name, t, dur } — level-up announcement
+
+/* ============================================================
+   RENDERING — static board on offscreen canvas (repainted per theme)
    ============================================================ */
 const bg = document.createElement('canvas');
 bg.width = W; bg.height = H;
-(function paintBoard(){
+function paintBoard(t){
   const g = bg.getContext('2d');
+  g.clearRect(0,0,W,H);
   const wood = g.createLinearGradient(0,0,W,H);
-  wood.addColorStop(0,'#9a6a38'); wood.addColorStop(0.5,'#8a5c2e'); wood.addColorStop(1,'#7a4f26');
+  wood.addColorStop(0,t.wood[0]); wood.addColorStop(0.5,t.wood[1]); wood.addColorStop(1,t.wood[2]);
   g.fillStyle = wood; g.fillRect(0,0,W,H);
   g.globalAlpha = 0.14;
   for (let i = 0; i < 52; i++){
-    g.strokeStyle = i%2 ? '#5e3c18' : '#b98c52';
+    g.strokeStyle = i%2 ? t.grainA : t.grainB;
     g.lineWidth = 1 + Math.random()*1.6;
     g.beginPath();
     const gx = Math.random()*W;
@@ -706,12 +813,12 @@ bg.width = W; bg.height = H;
   g.lineTo(W-WALL, FLOOR_Y); g.lineTo(WALL, FLOOR_Y);
   g.closePath();
   const field = g.createLinearGradient(0,0,0,H);
-  field.addColorStop(0,'#7c4f22'); field.addColorStop(1,'#634019');
+  field.addColorStop(0,t.field[0]); field.addColorStop(1,t.field[1]);
   g.fillStyle = field; g.fill();
   g.clip();
   g.globalAlpha = 0.1;
   for (let i = 0; i < 34; i++){
-    g.strokeStyle = '#3d2407'; g.lineWidth = 1;
+    g.strokeStyle = t.fieldGrain; g.lineWidth = 1;
     g.beginPath();
     const gx = Math.random()*W;
     g.moveTo(gx,0); g.lineTo(gx + (Math.random()*40-20), H);
@@ -721,28 +828,28 @@ bg.width = W; bg.height = H;
   g.restore();
 
   // trim
-  g.strokeStyle = '#46280c'; g.lineWidth = WALL*2;
+  g.strokeStyle = t.trimDark; g.lineWidth = WALL*2;
   g.beginPath();
   g.arc(W/2, ARC_CY, ARC_R + WALL, Math.PI, 0);
   g.lineTo(W, H); g.lineTo(0, H);
   g.closePath(); g.stroke();
-  g.strokeStyle = '#c89b4a'; g.lineWidth = 2.5;
+  g.strokeStyle = t.accent; g.lineWidth = 2.5;
   g.beginPath();
   g.arc(W/2, ARC_CY, ARC_R, Math.PI, 0);
   g.lineTo(W-WALL, FLOOR_Y); g.lineTo(WALL, FLOOR_Y);
   g.closePath(); g.stroke();
 
   // launch lane wall
-  g.fillStyle = '#46280c';
+  g.fillStyle = t.trimDark;
   g.beginPath();
   g.arc(LANE_X, LANE_TOP, LANE_W, Math.PI, 0);
   g.rect(LANE_X-LANE_W, LANE_TOP, LANE_W*2, FLOOR_Y-LANE_TOP);
   g.fill();
-  g.strokeStyle = 'rgba(200,155,74,.6)'; g.lineWidth = 1;
+  g.strokeStyle = t.accentSoft; g.lineWidth = 1;
   g.strokeRect(LANE_X-LANE_W, LANE_TOP, LANE_W*2, FLOOR_Y-LANE_TOP);
 
   // lane arrows
-  g.fillStyle = 'rgba(255,220,140,.4)';
+  g.fillStyle = t.laneArrow;
   for (let y = 810; y > 360; y -= 60){
     g.beginPath();
     g.moveTo(PLUNGER_X, y-9); g.lineTo(PLUNGER_X-8, y+5); g.lineTo(PLUNGER_X+8, y+5);
@@ -750,39 +857,39 @@ bg.width = W; bg.height = H;
   }
 
   // one-way gate flap
-  g.strokeStyle = '#5a3a14'; g.lineWidth = 4; g.lineCap = 'round';
+  g.strokeStyle = t.gate; g.lineWidth = 4; g.lineCap = 'round';
   g.beginPath(); g.moveTo(LANE_X-LANE_W, 290); g.lineTo(W-WALL, 284); g.stroke();
 
-  // 30 hole pockets + LED housings
+  // hole pockets + LED housings
   for (let i = 0; i < SLOT_N; i++){
     const x = SLOT_L + SLOT_W*i;
     const grad = g.createLinearGradient(0, SLOT_TOP, 0, FLOOR_Y);
-    grad.addColorStop(0, i%2 ? '#56371a' : '#4c2f14');
-    grad.addColorStop(1, '#1c0e02');
+    grad.addColorStop(0, i%2 ? t.pocketA : t.pocketB);
+    grad.addColorStop(1, t.pocketBottom);
     g.fillStyle = grad;
     g.fillRect(x+1.4, SLOT_TOP, SLOT_W-2.8, FLOOR_Y-SLOT_TOP);
     // hole opening at the bottom
     g.beginPath();
     g.ellipse(x+SLOT_W/2, FLOOR_Y-7, SLOT_W/2-3, 4.5, 0, 0, Math.PI*2);
-    g.fillStyle = '#0a0501'; g.fill();
+    g.fillStyle = t.hole; g.fill();
     // LED housing (off state)
     g.beginPath(); g.arc(x+SLOT_W/2, LED_Y, 3.4, 0, Math.PI*2);
-    g.fillStyle = '#3a0a08'; g.fill();
-    g.strokeStyle = '#1c0502'; g.lineWidth = 1; g.stroke();
+    g.fillStyle = t.ledOff; g.fill();
+    g.strokeStyle = t.ledOffStroke; g.lineWidth = 1; g.stroke();
   }
 
   // dividers
   for (const dv of dividers){
-    g.fillStyle = '#3a2008';
+    g.fillStyle = t.divider;
     g.beginPath();
     g.arc(dv.x, dv.y1, 1.4, Math.PI, 0);
     g.rect(dv.x-1.4, dv.y1, 2.8, dv.y2-dv.y1);
     g.fill();
-    g.fillStyle = 'rgba(255,210,120,.3)';
+    g.fillStyle = t.dividerHi;
     g.fillRect(dv.x-0.5, dv.y1, 1, dv.y2-dv.y1);
   }
 
-  // nails
+  // nails (metallic in every theme)
   for (const p of pins){
     g.beginPath(); g.arc(p.x+1, p.y+1.5, p.r, 0, Math.PI*2);
     g.fillStyle = 'rgba(0,0,0,.4)'; g.fill();
@@ -791,7 +898,24 @@ bg.width = W; bg.height = H;
     g.beginPath(); g.arc(p.x, p.y, p.r, 0, Math.PI*2);
     g.fillStyle = m; g.fill();
   }
-})();
+}
+function applyTheme(idx, announce){
+  themeIdx = idx;
+  paintBoard(THEMES[idx]);
+  document.body.style.background = THEMES[idx].bodyBg;
+  if (announce){
+    themeFx = { name: THEMES[idx].name, t: 0, dur: 2.6 };
+    flash = Math.max(flash, 0.7);
+    shake = Math.max(shake, 0.7);
+    // little ascending chime
+    [523,659,784,1047,1319].forEach((f,i)=> blip('triangle', f, 0.3, 0.2, f, i*0.08));
+  }
+}
+function checkTheme(){
+  const idx = themeIdxFor(marbles);
+  if (idx !== themeIdx) applyTheme(idx, idx > themeIdx);
+}
+applyTheme(0, false);
 
 const WHEEL_X = W/2, WHEEL_Y = 172, WHEEL_R = 96;
 function drawWheel(g, now){
@@ -1043,6 +1167,32 @@ function render(now){
     g.fillStyle = `rgba(255,222,120,${Math.min(0.55, flash*0.5)})`;
     g.fillRect(0, 0, W, H);
   }
+
+  // theme level-up announcement
+  if (themeFx){
+    const p = themeFx.t / themeFx.dur;
+    const grow = Math.min(1, themeFx.t / 0.3);
+    const k = grow - 1;
+    const scale = 1 + 2.2*k*k*k + 1.4*k*k;
+    const alpha = p > 0.78 ? 1 - (p - 0.78)/0.22 : 1;
+    g.save();
+    g.globalAlpha = alpha;
+    g.translate(W/2, 430);
+    g.scale(scale, scale);
+    g.textAlign = 'center';
+    g.font = 'bold 15px "Malgun Gothic", sans-serif';
+    g.fillStyle = '#fff6d0';
+    g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 4;
+    g.strokeText('새로운 무대 도착!', 0, -30);
+    g.fillText('새로운 무대 도착!', 0, -30);
+    g.shadowColor = '#ffd24a'; g.shadowBlur = 18;
+    g.font = 'bold 34px "Malgun Gothic", sans-serif';
+    g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 6;
+    g.strokeText(themeFx.name, 0, 12);
+    g.fillStyle = '#ffd24a';
+    g.fillText(themeFx.name, 0, 12);
+    g.restore();
+  }
   g.restore();
 }
 
@@ -1092,6 +1242,10 @@ function frame(t){
     banner.t += dt;
     if (banner.t >= banner.dur) banner = null;
   }
+  if (themeFx){
+    themeFx.t += dt;
+    if (themeFx.t >= themeFx.dur) themeFx = null;
+  }
   for (let i = particles.length-1; i >= 0; i--){
     const p = particles[i];
     if (p.delay > 0){ p.delay -= dt; continue; }
@@ -1115,28 +1269,25 @@ function frame(t){
 }
 
 /* ============================================================
-   ONLINE LEADERBOARD — Supabase (free tier)
-   table: scores(name pk, score, updated_at) + keep-highest trigger
+   ONLINE LEADERBOARD — Firebase Realtime Database
+   /scores/{nickKey} = { name, score, ts } ; keep-highest enforced
+   both in DB rules and client transaction. Live via .on('value').
    ============================================================ */
-const SUPA_URL = '';   // e.g. https://xxxx.supabase.co
-const SUPA_KEY = '';   // anon public key (safe to expose)
-const LB_ON = /^https:\/\//.test(SUPA_URL);
-const lbHeaders = { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY };
+const firebaseConfig = {
+  apiKey: "AIzaSyCmVr9hbRDzDUXK6R2SH-YmsikrBSt0m-0",
+  authDomain: "taiwan-pinball-12pin.firebaseapp.com",
+  databaseURL: "https://taiwan-pinball-12pin-default-rtdb.firebaseio.com",
+  projectId: "taiwan-pinball-12pin",
+  storageBucket: "taiwan-pinball-12pin.firebasestorage.app",
+  messagingSenderId: "746674691306",
+  appId: "1:746674691306:web:f0c9eedf4cd42fb6a58b93"
+};
+let lbDB = null;
+const LB_ON = !!(window.firebase && firebaseConfig.databaseURL);
 
 function myNick(){ return localStorage.getItem('tw-pinball-nick') || ''; }
+function nickKey(name){ return name.replace(/[.#$\[\]\/]/g, '_'); }
 
-async function lbFetch(){
-  if (!LB_ON) return;
-  try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/scores?select=name,score&order=score.desc,updated_at.asc&limit=20`,
-                          { headers: lbHeaders });
-    if (!r.ok) throw 0;
-    renderLB(await r.json());
-    document.getElementById('lbStatus').textContent = '';
-  } catch(e){
-    document.getElementById('lbStatus').textContent = '연결 실패 — 잠시 후 재시도합니다';
-  }
-}
 function renderLB(rows){
   const ol = document.getElementById('lbList');
   ol.innerHTML = '';
@@ -1159,7 +1310,7 @@ function renderLB(rows){
   }
 }
 async function lbSubmit(rawName, score, msgEl){
-  if (!LB_ON){ msgEl.textContent = '랭킹 서버가 아직 연결되지 않았어요'; return; }
+  if (!LB_ON || !lbDB){ msgEl.textContent = '랭킹 서버 연결 대기 중...'; return; }
   const name = (rawName || '').trim().slice(0, 12);
   if (!name){ msgEl.textContent = '닉네임을 입력하세요'; return; }
   if (!/^[가-힣ㄱ-ㅎa-zA-Z0-9 _\-]{1,12}$/.test(name)){
@@ -1167,38 +1318,55 @@ async function lbSubmit(rawName, score, msgEl){
   }
   if (!(score > 0)){ msgEl.textContent = '아직 등록할 기록이 없어요'; return; }
   localStorage.setItem('tw-pinball-nick', name);
+  document.getElementById('nick').value = name;
+  document.getElementById('ovNick').value = name;
   msgEl.textContent = '등록 중...';
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/scores`, {
-      method: 'POST',
-      headers: { ...lbHeaders, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
-      body: JSON.stringify([{ name, score }]),
+    const ref = lbDB.ref('scores/' + nickKey(name));
+    const res = await ref.transaction(cur => {
+      if (cur && cur.score >= score) return;        // keep highest — abort
+      return { name, score, ts: firebase.database.ServerValue.TIMESTAMP };
     });
-    if (!r.ok) throw 0;
-    msgEl.textContent = '✅ 등록 완료!';
-    blip('triangle', 880, 0.2, 0.2, 880);
-    blip('triangle', 1175, 0.3, 0.2, 1175, 0, 0.12);
-    lbFetch();
+    if (res.committed){
+      msgEl.textContent = '✅ 랭킹 등록 완료!';
+      blip('triangle', 880, 0.2, 0.2, 880);
+      blip('triangle', 1175, 0.3, 0.2, 1175, 0, 0.12);
+    } else {
+      msgEl.textContent = '이미 더 높은 기록이 등록돼 있어요';
+    }
   } catch(e){ msgEl.textContent = '등록 실패 — 다시 시도해주세요'; }
 }
 function lbInit(){
-  const nickEls = [document.getElementById('nick'), document.getElementById('ovNick')];
-  nickEls.forEach(el => el.value = myNick());
+  document.getElementById('nick').value = myNick();
+  document.getElementById('ovNick').value = myNick();
   document.getElementById('lbSend').addEventListener('click', () =>
     lbSubmit(document.getElementById('nick').value, best, document.getElementById('lbMsg')));
   document.getElementById('ovSend').addEventListener('click', () =>
     lbSubmit(document.getElementById('ovNick').value, best, document.getElementById('ovMsg')));
+  [['nick','lbMsg'],['ovNick','ovMsg']].forEach(([inp,msg]) =>
+    document.getElementById(inp).addEventListener('keydown', e => {
+      if (e.key === 'Enter') lbSubmit(document.getElementById(inp).value, best, document.getElementById(msg));
+    }));
+
   if (!LB_ON){
     document.getElementById('lbStatus').textContent = '⏳ 랭킹 서버 연결 준비 중...';
     return;
   }
-  lbFetch();
-  setInterval(lbFetch, 30000);                       // safety-net polling
-  if (window.supabase){                              // realtime push updates
-    const supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
-    supa.channel('scores-live')
-      .on('postgres_changes', { event:'*', schema:'public', table:'scores' }, lbFetch)
-      .subscribe();
+  try {
+    firebase.initializeApp(firebaseConfig);
+    lbDB = firebase.database();
+    // live TOP 20 — pushed automatically on any change
+    lbDB.ref('scores').orderByChild('score').limitToLast(20).on('value', snap => {
+      const rows = [];
+      snap.forEach(c => { rows.push(c.val()); });
+      rows.sort((a,b) => b.score - a.score);
+      renderLB(rows);
+      document.getElementById('lbStatus').textContent = '🟢 실시간 연결됨';
+    }, err => {
+      document.getElementById('lbStatus').textContent = '연결 실패 — 새로고침 해주세요';
+    });
+  } catch(e){
+    document.getElementById('lbStatus').textContent = '랭킹 초기화 오류';
   }
 }
 
