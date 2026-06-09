@@ -252,6 +252,12 @@ let popups = [], shake = 0;
 let particles = [];          // payout marble fountain + sparkles
 let flash = 0;               // gold screen flash on big wins
 let banner = null;           // {txt, sub, t, dur, tier}
+let rings = [];              // expanding shock rings {x,y,r,maxR,t,dur,color,lw}
+let confetti = [];           // falling confetti {x,y,vx,vy,rot,vr,w,h,hue,t,dur,shape}
+let fireworks = [];          // scheduled bursts {x,y,delay,hue,n}
+let rays = null;             // god-ray burst {x,y,t,dur,tier}
+let borderGlow = 0;          // neon screen-edge glow intensity
+let rainbow = 0;             // rainbow strobe timer (top tiers)
 let stateMsg = '';
 
 const roul = { angle: 0, spinning:false, t:0, dur:3, from:0, total:0, lastSeg:-1, resultMult:0 };
@@ -364,13 +370,27 @@ function sndLaunch(p){
   blip('triangle', 110 + p*90, 0.22, 0.35, 50);
   blip('sine', 300 + p*250, 0.1, 0.2, 90);
 }
-function sndWin(payout, m){
-  const notes = m >= 15 ? [523,659,784,1047,1319,1568,2093]
-              : m >= 8  ? [523,659,784,1047,1319]
-              :           [523,659,784,1047];
-  notes.forEach((f,i)=>{ blip('triangle', f, 0.3, 0.24, f, i*0.09); blip('sine', f*2, 0.22, 0.09, f*2, i*0.09); });
-  const k = Math.min(payout, 28);                // marbles pouring out
-  for (let i = 0; i < k; i++) sndClack(0.35 + i*0.05 + Math.random()*0.02, 0.16);
+function sndWin(payout, tier){
+  // ascending fanfare — longer & grander with tier
+  const scale = [523,587,659,784,880,1047,1175,1319,1568,1760,2093,2349,2637];
+  const len = Math.min(scale.length, 3 + tier*2);
+  for (let i = 0; i < len; i++){
+    const f = scale[i], when = i*0.085;
+    blip('triangle', f, 0.32, 0.22, f, when);
+    blip('sine', f*2, 0.22, 0.08, f*2, when);
+  }
+  // bass boom for big wins
+  if (tier >= 3){
+    blip('sine', 70, 0.6, 0.32, 45);
+    noiseBurst(0.3, 0.16, 1400);
+  }
+  if (tier >= 5){            // double boom + shimmer
+    blip('sine', 55, 0.9, 0.34, 38, 0.15);
+    for (let i = 0; i < 8; i++) blip('sine', 2600 + i*240, 0.5, 0.05, 3000, 0.2 + i*0.05);
+  }
+  // marbles pouring into the tray
+  const k = Math.min(20 + tier*8, 64);
+  for (let i = 0; i < k; i++) sndClack(0.35 + i*0.035 + Math.random()*0.02, 0.15);
 }
 function sndMiss(){
   blip('triangle', 392, 0.2, 0.22, 392);
@@ -447,56 +467,128 @@ function onSpinEnd(){
     updateHUD();
   }, 500 + litChosen.length*180 + 350);
 }
+/* payout → celebration tier (1‥7, up to 億) */
+function winTier(payout){
+  if (payout >= 100000000) return 7;   // 억
+  if (payout >=  10000000) return 6;   // 천만
+  if (payout >=   1000000) return 5;   // 백만
+  if (payout >=    100000) return 4;   // 십만
+  if (payout >=     10000) return 3;   // 만
+  if (payout >=      1000) return 2;   // 천
+  return 1;
+}
+const TIER_LABEL = {
+  1:'🎉 당첨!', 2:'✨ BIG WIN ✨', 3:'🔥 HUGE WIN 🔥', 4:'💎 MEGA WIN 💎',
+  5:'👑 SUPER JACKPOT 👑', 6:'🌟 ULTRA JACKPOT 🌟', 7:'🌈 億 ! 전설의 잭팟 🌈',
+};
 function spawnPayout(idx, payout, tier){
   const hx = SLOT_L + SLOT_W*(idx+0.5);
-  // marble fountain bursting out of the winning hole
-  const count = Math.min(12 + Math.floor(payout*0.8), 90);
+
+  // 1) marble fountain bursting out of the winning hole (scales with tier)
+  const count = Math.min(14 + tier*24 + Math.floor(payout*0.3), 260);
   for (let i = 0; i < count; i++){
     particles.push({
-      x: hx + (Math.random()-0.5)*8, y: FLOOR_Y - 10,
-      vx: (Math.random()-0.5)*(320 + tier*120),
-      vy: -(380 + Math.random()*480 + tier*140),
-      r: 3.2 + Math.random()*2.6,
-      hue: Math.random()*360, t: 2.2,
-      delay: i * 0.016, spark: false,
+      x: hx + (Math.random()-0.5)*10, y: FLOOR_Y - 10,
+      vx: (Math.random()-0.5)*(300 + tier*150),
+      vy: -(360 + Math.random()*460 + tier*180),
+      r: 3 + Math.random()*2.8,
+      hue: Math.random()*360, t: 2.2 + tier*0.15,
+      delay: i * 0.012, spark: false,
     });
   }
-  // gold sparkles for big wins
+
+  // 2) gold sparkle burst
   if (tier >= 2){
-    for (let i = 0; i < tier*22; i++){
-      const a = Math.random()*Math.PI*2, sp = 120 + Math.random()*420;
+    const k = tier*30;
+    for (let i = 0; i < k; i++){
+      const a = Math.random()*Math.PI*2, sp = 120 + Math.random()*(360 + tier*90);
       particles.push({
         x: hx, y: FLOOR_Y - 40,
-        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 250,
-        r: 1.5 + Math.random()*2.2,
-        hue: 45, t: 0.9 + Math.random()*0.7,
-        delay: Math.random()*0.25, spark: true,
+        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 260,
+        r: 1.4 + Math.random()*2.4,
+        hue: tier >= 6 ? Math.random()*360 : 45,
+        t: 0.9 + Math.random()*0.9, delay: Math.random()*0.3, spark: true,
       });
     }
   }
+
+  // 3) shock rings
+  if (tier >= 2)
+    rings.push({ x:hx, y:FLOOR_Y-30, r:6, maxR:90+tier*40, t:0, dur:0.6, color:'255,225,120', lw:5 });
+  if (tier >= 4){
+    for (let r = 0; r < tier-2; r++)
+      rings.push({ x:W/2, y:430, r:10, maxR:Math.hypot(W,H), t:-r*0.18, dur:0.9, color:'255,210,90', lw:7 });
+  }
+
+  // 4) confetti rain from the top
+  if (tier >= 3){
+    const cc = (tier-2)*45;
+    for (let i = 0; i < cc; i++){
+      confetti.push({
+        x: Math.random()*W, y: -20 - Math.random()*200,
+        vx: (Math.random()-0.5)*120, vy: 120 + Math.random()*180,
+        rot: Math.random()*6.28, vr: (Math.random()-0.5)*10,
+        w: 5+Math.random()*7, h: 8+Math.random()*10,
+        hue: Math.random()*360, t: 0, dur: 2.4 + tier*0.25,
+        shape: Math.random() < 0.5 ? 'rect' : 'strip',
+      });
+    }
+  }
+
+  // 5) fireworks bursts across the screen (timed)
+  if (tier >= 5){
+    const bursts = (tier-3)*3;
+    for (let i = 0; i < bursts; i++){
+      fireworks.push({
+        x: 60 + Math.random()*(W-120),
+        y: 120 + Math.random()*420,
+        delay: 0.15 + i*0.22 + Math.random()*0.1,
+        hue: Math.random()*360,
+        n: 26 + tier*6,
+      });
+    }
+  }
+
+  // 6) god rays + rainbow for the biggest wins
+  if (tier >= 4) rays = { x:hx, y:FLOOR_Y-30, t:0, dur:1.0 + tier*0.2, tier };
+  if (tier >= 6) rainbow = 1;
+
+  borderGlow = Math.max(borderGlow, Math.min(1, 0.25 + tier*0.13));
+}
+function fireBurst(x, y, hue, n){
+  for (let i = 0; i < n; i++){
+    const a = (i/n)*Math.PI*2 + Math.random()*0.2, sp = 120 + Math.random()*260;
+    particles.push({
+      x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      r:1.6+Math.random()*2.2, hue:(hue+Math.random()*40)%360,
+      t:0.7+Math.random()*0.6, delay:0, spark:true,
+    });
+  }
+  blip('triangle', 200 + Math.random()*120, 0.25, 0.18, 60);
+  noiseBurst(0.18, 0.12, 2200);
 }
 function resolveRound(b){
   b.state = 'done'; b.vx = b.vy = 0;
   const idx = Math.max(0, Math.min(SLOT_N-1, Math.floor((b.x - SLOT_L) / SLOT_W)));
   const hit = litChosen.includes(idx);
   state = 'RESULT';
+  let pause = 1800;
   if (hit){
     const payout = wager * mult;
     marbles += payout;
-    sndWin(payout, mult);
-    // impact scales with how much you won
-    const tier = payout >= 400 ? 3 : payout >= 120 ? 2 : 1;
-    shake = 0.4 + tier*0.5;
-    flash = 0.35 + tier*0.22;
+    const tier = winTier(payout);
+    sndWin(payout, tier);
+    shake = 0.4 + tier*0.45;
+    flash = Math.min(0.95, 0.3 + tier*0.13);
     spawnPayout(idx, payout, tier);
     banner = {
       txt: `+${payout.toLocaleString()}`,
-      sub: tier === 3 ? '💰 MEGA WIN!! 💰' : tier === 2 ? '✨ BIG WIN! ✨' : '🎉 당첨!',
-      t: 0, dur: 1.3 + tier*0.35, tier,
+      sub: TIER_LABEL[tier], t: 0, dur: 1.3 + tier*0.32, tier,
     };
     stateMsg = `🎉 성공!! +${payout.toLocaleString()}개 지급!`;
     popups.push({ x: SLOT_L + SLOT_W*(idx+0.5), y: 740, txt:`+${payout.toLocaleString()}`,
                   t:1.8, color:'#ffd24a', size:26 });
+    pause = 1800 + (tier >= 3 ? (tier-2)*650 : 0);   // let the big shows finish
   } else {
     sndMiss();
     stateMsg = `😵 꽝... 배팅한 ${wager}개를 잃었어요`;
@@ -509,7 +601,7 @@ function resolveRound(b){
     litSlots = []; litChosen = []; mult = 0;
     if (marbles <= 0) endGame();
     else { state = 'BET'; stateMsg = '🎱 배팅할 구슬을 정하고 투입하세요'; updateHUD(); }
-  }, 1800);
+  }, pause);
 }
 function endGame(){
   state = 'OVER';
@@ -527,6 +619,7 @@ function resetGame(){
   marbles = START_MARBLES; bet = 10; mult = 0; rounds = 0;
   litSlots = []; litChosen = []; balls = []; popups = [];
   particles = []; flash = 0; banner = null;
+  rings = []; confetti = []; fireworks = []; rays = null; borderGlow = 0; rainbow = 0;
   charging = false; power = 0; shake = 0;
   roul.spinning = false;
   state = 'BET';
@@ -1097,6 +1190,36 @@ function render(now){
     g.fillText('꾹 눌러 발사! →', 440, 742);
   }
 
+  // god rays from the winning hole (big wins)
+  if (rays){
+    const rp = rays.t / rays.dur;
+    const a = (1 - rp) * 0.45;
+    const n = 14 + rays.tier*3;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.translate(rays.x, rays.y);
+    g.rotate(rays.t * 0.4);
+    for (let i = 0; i < n; i++){
+      g.rotate(Math.PI*2/n);
+      const grad = g.createLinearGradient(0, 0, 0, -1000);
+      grad.addColorStop(0, `rgba(255,228,130,${a})`);
+      grad.addColorStop(1, 'rgba(255,228,130,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.moveTo(-10,0); g.lineTo(10,0); g.lineTo(30,-1000); g.lineTo(-30,-1000);
+      g.closePath(); g.fill();
+    }
+    g.restore();
+  }
+  // rainbow strobe wash (top tiers)
+  if (rainbow > 0){
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = `hsla(${(now/4)%360} 90% 60% / ${0.13*rainbow})`;
+    g.fillRect(0, 0, W, H);
+    g.restore();
+  }
+
   // payout particles (marble fountain + sparkles)
   for (const p of particles){
     if (p.delay > 0) continue;
@@ -1116,6 +1239,28 @@ function render(now){
       g.beginPath(); g.arc(p.x, p.y, p.r, 0, Math.PI*2);
       g.fillStyle = grad; g.fill();
     }
+  }
+  g.globalAlpha = 1;
+
+  // shock rings
+  for (const r of rings){
+    if (r.t < 0) continue;
+    const rp = r.t / r.dur, a = 1 - rp;
+    g.beginPath(); g.arc(r.x, r.y, r.r, 0, Math.PI*2);
+    g.strokeStyle = `rgba(${r.color},${a*0.85})`;
+    g.lineWidth = r.lw * (1 - rp*0.6);
+    g.stroke();
+  }
+  // confetti
+  for (const c of confetti){
+    const a = Math.min(1, (c.dur - c.t)/0.6);
+    g.save();
+    g.globalAlpha = Math.max(0, a);
+    g.translate(c.x, c.y); g.rotate(c.rot);
+    g.fillStyle = `hsl(${c.hue} 85% 60%)`;
+    if (c.shape === 'strip') g.fillRect(-c.w/2, -c.h/2, c.w*0.5, c.h);
+    else g.fillRect(-c.w/2, -c.h/2, c.w, c.h);
+    g.restore();
   }
   g.globalAlpha = 1;
 
@@ -1147,25 +1292,45 @@ function render(now){
       g.shadowColor = banner.tier === 3 ? '#ffae00' : '#ffd24a';
       g.shadowBlur = 14 + banner.tier*8;
     }
-    g.font = `bold ${15 + banner.tier*3}px "Malgun Gothic", sans-serif`;
+    g.font = `bold ${Math.min(15 + banner.tier*3, 30)}px "Malgun Gothic", sans-serif`;
     g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 5;
-    g.strokeText(banner.sub, 0, -34);
-    g.fillStyle = banner.tier === 3 ? '#ffae00' : '#ffd24a';
-    g.fillText(banner.sub, 0, -34);
-    g.font = `bold ${34 + banner.tier*10}px "Segoe UI", sans-serif`;
-    g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 7;
-    g.strokeText(banner.txt, 0, 14);
-    const tg = g.createLinearGradient(0, -20, 0, 20);
-    tg.addColorStop(0, '#fff6d0'); tg.addColorStop(0.5, '#ffd24a'); tg.addColorStop(1, '#e8930c');
+    g.strokeText(banner.sub, 0, -38);
+    g.fillStyle = banner.tier >= 5 ? '#ffae00' : '#ffd24a';
+    g.fillText(banner.sub, 0, -38);
+    g.font = `bold ${Math.min(32 + banner.tier*9, 70)}px "Segoe UI", sans-serif`;
+    g.strokeStyle = 'rgba(0,0,0,.78)'; g.lineWidth = 7;
+    g.strokeText(banner.txt, 0, 16);
+    let tg;
+    if (banner.tier >= 6){                       // rainbow shimmer for the top tiers
+      tg = g.createLinearGradient(-130, 0, 130, 0);
+      for (let s = 0; s <= 6; s++) tg.addColorStop(s/6, `hsl(${(now/3 + s*55)%360} 90% 62%)`);
+    } else {
+      tg = g.createLinearGradient(0, -22, 0, 22);
+      tg.addColorStop(0, '#fff6d0'); tg.addColorStop(0.5, '#ffd24a'); tg.addColorStop(1, '#e8930c');
+    }
     g.fillStyle = tg;
-    g.fillText(banner.txt, 0, 14);
+    g.fillText(banner.txt, 0, 16);
     g.restore();
   }
 
   // gold flash on wins (stronger for bigger payouts)
   if (flash > 0){
-    g.fillStyle = `rgba(255,222,120,${Math.min(0.55, flash*0.5)})`;
+    g.fillStyle = `rgba(255,222,120,${Math.min(0.6, flash*0.5)})`;
     g.fillRect(0, 0, W, H);
+  }
+
+  // neon border glow during big celebrations
+  if (borderGlow > 0){
+    g.save();
+    g.strokeStyle = rainbow > 0
+      ? `hsla(${(now/4)%360} 90% 60% / ${borderGlow})`
+      : `rgba(255,210,90,${borderGlow})`;
+    g.lineWidth = 9;
+    g.shadowColor = g.strokeStyle; g.shadowBlur = 38;
+    g.strokeRect(5, 5, W-10, H-10);
+    g.lineWidth = 3;
+    g.strokeRect(5, 5, W-10, H-10);
+    g.restore();
   }
 
   // theme level-up announcement
@@ -1261,6 +1426,33 @@ function frame(t){
   for (let i = popups.length-1; i >= 0; i--){
     popups[i].t -= dt; popups[i].y -= dt*34;
     if (popups[i].t <= 0) popups.splice(i, 1);
+  }
+  // --- celebration effects ---
+  borderGlow = Math.max(0, borderGlow - dt*0.55);
+  rainbow = Math.max(0, rainbow - dt*0.4);
+  if (rays){ rays.t += dt; if (rays.t >= rays.dur) rays = null; }
+  for (let i = rings.length-1; i >= 0; i--){
+    const r = rings[i];
+    r.t += dt;
+    if (r.t < 0) continue;
+    const p = r.t / r.dur;
+    r.r = r.r + (r.maxR - r.r) * Math.min(1, dt*8);
+    if (p >= 1) rings.splice(i, 1);
+  }
+  for (let i = confetti.length-1; i >= 0; i--){
+    const c = confetti[i];
+    c.t += dt;
+    c.vy += 60*dt; c.vx *= 0.99;
+    c.x += c.vx*dt; c.y += c.vy*dt; c.rot += c.vr*dt;
+    if (c.t >= c.dur || c.y > H+30) confetti.splice(i, 1);
+  }
+  for (let i = fireworks.length-1; i >= 0; i--){
+    fireworks[i].delay -= dt;
+    if (fireworks[i].delay <= 0){
+      const f = fireworks[i];
+      fireBurst(f.x, f.y, f.hue, f.n);
+      fireworks.splice(i, 1);
+    }
   }
 
   updateRollSound();
