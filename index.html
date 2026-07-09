@@ -95,6 +95,35 @@
   #lbMsg, #ovMsg { font-size:12px; color:#7CFC9A; text-align:center; min-height:15px; }
   #ovSubmit { margin-bottom:14px; }
   #ovSubmit .nickRow input { font-size:15px; }
+  /* ----- hall of fame ----- */
+  #hofBox {
+    background:linear-gradient(170deg,#3a2c08,#1c1503); border:2px solid #d4af37; border-radius:12px;
+    padding:10px 12px; margin-bottom:6px; box-shadow:0 0 18px rgba(212,175,55,.25) inset;
+  }
+  #hofBox h2 {
+    font-size:16px; text-align:center; letter-spacing:1px;
+    background:linear-gradient(90deg,#ffe9a8,#ffd24a,#e8930c,#ffd24a,#ffe9a8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 0 12px rgba(255,200,80,.4);
+  }
+  #hofSub { font-size:10px; color:#c9a94a; text-align:center; letter-spacing:2px; margin-bottom:6px; }
+  #hofList { list-style:none; display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  #hofList li { display:flex; justify-content:space-between; gap:8px; padding:5px 9px; border-radius:7px;
+    background:rgba(212,175,55,.1); border:1px solid rgba(212,175,55,.35); }
+  #hofList li .lbName { color:#ffe9b0; }
+  #hofList li .lbScore { color:#ffd24a; }
+  #hofList li.mine { outline:2px solid #ffd24a; }
+  #hofList .hofEmpty { justify-content:center; color:#9a8433; font-size:11px; background:none; border:none; }
+  #ovHof {
+    display:block; width:100%; margin:12px 0 2px; padding:12px 0; border:none; border-radius:12px; cursor:pointer;
+    font-size:15px; font-weight:bold; color:#3a2600; letter-spacing:1px;
+    background:linear-gradient(180deg,#ffe9a8,#f0b93a,#d4901c);
+    box-shadow:0 3px 0 #8a5d14, 0 0 22px rgba(255,200,80,.5);
+    animation:hofGlow 1.4s ease-in-out infinite;
+  }
+  #ovHof:active { transform:translateY(2px); box-shadow:0 1px 0 #8a5d14; }
+  @keyframes hofGlow { 0%,100%{ box-shadow:0 3px 0 #8a5d14, 0 0 16px rgba(255,200,80,.4); } 50%{ box-shadow:0 3px 0 #8a5d14, 0 0 30px rgba(255,220,120,.85); } }
+  #ovHofMsg { font-size:12px; color:#ffd24a; text-align:center; min-height:15px; }
   /* ---- tablet / stacked ---- */
   @media (max-width: 960px){
     body { overflow:auto; height:auto; }
@@ -151,6 +180,8 @@
         <div style="font-size:14px;color:#e8c89a;margin-bottom:8px;">최고 기록 <b id="ovBest" style="color:#8fe3ff;">0</b>개 — 온라인 랭킹에 올려보세요!</div>
         <div class="nickRow"><input id="ovNick" maxlength="12" placeholder="닉네임 (최대 12자)"><button id="ovSend">🌐 랭킹 등록</button></div>
         <div id="ovMsg"></div>
+        <button id="ovHof" style="display:none;">🏛️ 명예의 전당에 이름 새기기</button>
+        <div id="ovHofMsg"></div>
       </div>
       <button id="restart">🔄 구슬 100개로 다시 시작</button>
     </div>
@@ -171,6 +202,11 @@
 </p>
 </div>
 <aside id="lbPanel">
+  <div id="hofBox">
+    <h2>🏛️ 명예의 전당</h2>
+    <div id="hofSub">兆(조)를 넘어선 전설들</div>
+    <ol id="hofList"></ol>
+  </div>
   <h2>🌐 실시간 랭킹 TOP 20</h2>
   <div id="lbStatus">불러오는 중...</div>
   <ol id="lbList"></ol>
@@ -610,7 +646,9 @@ function endGame(){
     `플레이 <b>${rounds}판</b><br>최고 기록 <b>${best.toLocaleString()}개</b>`;
   document.getElementById('ovBest').textContent = best.toLocaleString();
   document.getElementById('ovMsg').textContent = '';
+  document.getElementById('ovHofMsg').textContent = '';
   document.getElementById('ovSubmit').style.display = LB_ON ? '' : 'none';
+  if (typeof updateHofUI === 'function') updateHofUI();
   document.getElementById('overlay').classList.add('show');
   updateHUD();
 }
@@ -1516,6 +1554,48 @@ const LB_ON = !!(window.firebase && firebaseConfig.databaseURL);
 function myNick(){ return localStorage.getItem('tw-pinball-nick') || ''; }
 function nickKey(name){ return name.replace(/[.#$\[\]\/]/g, '_'); }
 
+const HOF_MIN = 1000000000000;   // 1조 — threshold to enter the Hall of Fame
+
+function renderHOF(rows){
+  const ol = document.getElementById('hofList');
+  if (!ol) return;
+  ol.innerHTML = '';
+  const me = myNick();
+  rows.forEach((row, i) => {
+    const li = document.createElement('li');
+    const crown = i===0 ? '👑' : `${i+1}.`;
+    const nm = document.createElement('span');
+    nm.className = 'lbName'; nm.textContent = `${crown} ${row.name}`;
+    const sc = document.createElement('span');
+    sc.className = 'lbScore'; sc.textContent = (+row.score).toLocaleString();
+    li.appendChild(nm); li.appendChild(sc);
+    if (me && row.name === me) li.classList.add('mine');
+    ol.appendChild(li);
+  });
+  if (!rows.length){
+    const li = document.createElement('li');
+    li.className = 'hofEmpty';
+    li.textContent = '아직 아무도 兆(조)를 넘지 못했습니다…';
+    ol.appendChild(li);
+  }
+}
+// engrave into the Hall of Fame (keep-highest). returns 'ok' | 'lower' | 'fail'
+async function writeHOF(name, score){
+  if (!lbDB || score < HOF_MIN) return 'fail';
+  try {
+    const ref = lbDB.ref('halloffame/' + nickKey(name));
+    const res = await ref.transaction(cur => {
+      if (cur && cur.score >= score) return;
+      return { name, score, ts: firebase.database.ServerValue.TIMESTAMP };
+    });
+    return res.committed ? 'ok' : 'lower';
+  } catch(e){ return 'fail'; }
+}
+function updateHofUI(){
+  const btn = document.getElementById('ovHof');
+  if (btn) btn.style.display = (LB_ON && best >= HOF_MIN) ? 'block' : 'none';
+}
+
 function renderLB(rows){
   const ol = document.getElementById('lbList');
   ol.innerHTML = '';
@@ -1562,6 +1642,13 @@ async function lbSubmit(rawName, score, msgEl){
     } else {
       msgEl.textContent = '이미 더 높은 기록이 등록돼 있어요';
     }
+    if (score >= HOF_MIN){                       // 조 돌파 → 명예의 전당 자동 등재
+      const hof = await writeHOF(name, score);
+      if (hof === 'ok'){
+        msgEl.textContent = '🏛️ 명예의 전당 등재 완료!';
+        [523,659,784,1047,1319,1568].forEach((f,i)=> blip('triangle', f, 0.3, 0.2, f, i*0.09));
+      }
+    }
   } catch(e){ msgEl.textContent = '등록 실패 — 다시 시도해주세요'; }
 }
 function lbInit(){
@@ -1575,6 +1662,21 @@ function lbInit(){
     document.getElementById(inp).addEventListener('keydown', e => {
       if (e.key === 'Enter') lbSubmit(document.getElementById(inp).value, best, document.getElementById(msg));
     }));
+  // explicit "명예의 전당 등재" button on the game-over screen
+  document.getElementById('ovHof').addEventListener('click', async () => {
+    const msgEl = document.getElementById('ovHofMsg');
+    if (best < HOF_MIN){ msgEl.textContent = '兆(1조)를 넘어야 도전할 수 있어요'; return; }
+    const name = (document.getElementById('ovNick').value || myNick()).trim().slice(0,12);
+    if (!/^[가-힣ㄱ-ㅎa-zA-Z0-9 _\-]{1,12}$/.test(name)){ msgEl.textContent = '닉네임을 먼저 입력하세요'; return; }
+    localStorage.setItem('tw-pinball-nick', name);
+    msgEl.textContent = '새기는 중...';
+    const r = await writeHOF(name, best);
+    if (r === 'ok'){
+      msgEl.textContent = '🏛️ 명예의 전당에 이름이 새겨졌습니다!';
+      [523,659,784,1047,1319,1568,2093].forEach((f,i)=> blip('triangle', f, 0.32, 0.22, f, i*0.09));
+    } else if (r === 'lower'){ msgEl.textContent = '이미 더 높은 기록으로 등재돼 있어요';
+    } else { msgEl.textContent = '등재 실패 — 다시 시도해주세요'; }
+  });
 
   if (!LB_ON){
     document.getElementById('lbStatus').textContent = '⏳ 랭킹 서버 연결 준비 중...';
@@ -1592,6 +1694,13 @@ function lbInit(){
       document.getElementById('lbStatus').textContent = '🟢 실시간 연결됨';
     }, err => {
       document.getElementById('lbStatus').textContent = '연결 실패 — 새로고침 해주세요';
+    });
+    // live Hall of Fame (兆 club)
+    lbDB.ref('halloffame').orderByChild('score').limitToLast(20).on('value', snap => {
+      const rows = [];
+      snap.forEach(c => { rows.push(c.val()); });
+      rows.sort((a,b) => b.score - a.score);
+      renderHOF(rows);
     });
   } catch(e){
     document.getElementById('lbStatus').textContent = '랭킹 초기화 오류';

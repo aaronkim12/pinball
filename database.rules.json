@@ -11,6 +11,18 @@
         "ts":    { ".validate": true },
         "$other": { ".validate": false }
       }
+    },
+    "halloffame": {
+      ".read": true,
+      ".indexOn": ["score"],
+      "$nick": {
+        ".write": "!data.exists() || newData.child('score').val() > data.child('score').val()",
+        ".validate": "newData.hasChildren(['name','score']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 12 && newData.child('score').isNumber() && newData.child('score').val() >= 1000000000000 && newData.child('score').val() <= 1000000000000000000",
+        "name":  { ".validate": true },
+        "score": { ".validate": true },
+        "ts":    { ".validate": true },
+        "$other": { ".validate": false }
+      }
     }
   }
 }
