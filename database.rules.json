@@ -5,7 +5,7 @@
       ".indexOn": ["score"],
       "$nick": {
         ".write": "!data.exists() || newData.child('score').val() > data.child('score').val()",
-        ".validate": "newData.hasChildren(['name','score']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 12 && newData.child('score').isNumber() && newData.child('score').val() >= 0 && newData.child('score').val() <= 9000000000000000",
+        ".validate": "newData.hasChildren(['name','score']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 12 && newData.child('score').isNumber() && newData.child('score').val() >= 0 && newData.child('score').val() <= 1000000000000000000",
         "name":  { ".validate": true },
         "score": { ".validate": true },
         "ts":    { ".validate": true },
